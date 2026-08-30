@@ -1,0 +1,4 @@
+[03:26:12] [MAIN] Target: getscreen.exe -> svchost.exe | PID: 9300
+[03:26:12] [MAIN] Shared memory created
+[03:26:12] [THREAD] Injection thread started
+[03:26:12] [ERROR] Admin privileges required.
