@@ -828,7 +828,7 @@
 #pragma comment(lib, "User32.lib")
 
 #ifdef _MSC_VER
-#pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+// #pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 #endif
 
 using namespace std;
